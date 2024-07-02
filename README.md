@@ -85,6 +85,36 @@ res = client.delete(
 print(res)
 ```
 
+# migration tool
+Milvus Lite provides a command line tool that can dump milvus-lite data into a json file, which can be imported into [milvus](https://github.com/milvus-io/milvus) and [Zilliz Cloud](https://zilliz.com/cloud)(the fully managed cloud service for Milvus). The milvus-lite command  command will be installed together with milvus-lite python package 
+```shell
+milvus-lite dump -h
+
+usage: milvus-lite dump [-h] [-d DB_FILE] [-c COLLECTION] [-p PATH]
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -d DB_FILE, --db-file DB_FILE
+                        milvus lite db file
+  -c COLLECTION, --collection COLLECTION
+                        collection that need to be dumped
+  -p PATH, --path PATH  dump file storage dir
+```
+export data:
+```shell
+milvus-lite dump -d ./milvus_demo.db -c demo_collection -p ./data_dir
+# ./milvus_demo.db: milvus lite db file
+# demo_collection: collection that need to be dumped
+#./data_dir : dump file storage dir
+```
+Upload data to zilliz cloud:
+
+https://docs.zilliz.com/docs/byoc/import-data 
+
+Or upload data to milvus:
+
+https://milvus.io/api-reference/pymilvus/v2.4.x/ORM/utility/do_bulk_insert.md
+
 # Contributing
 If you want to contribute to Milvus Lite, please read the [Contributing Guide](https://github.com/milvus-io/milvus-lite/blob/main/CONTRIBUTING.md) first.
 
