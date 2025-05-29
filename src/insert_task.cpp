@@ -144,6 +144,7 @@ InsertTask::Process(Rows* rows) {
     if (!(AddSystemField() && CheckDynamicFieldData() && GenFieldMap())) {
         return Status::ParameterInvalid();
     }
+    // TODO call function
     CHECK_STATUS(CheckOrSetVectorDim(), "");
 
     auto pk_field_name = schema_util::GetPkName(*schema_);

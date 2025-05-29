@@ -32,7 +32,8 @@ add_library(milite ${LITE_BUILD_TYPE}
   ${CMAKE_CURRENT_LIST_DIR}/schema_util.cpp
   ${CMAKE_CURRENT_LIST_DIR}/re_scorer.cpp
   ${CMAKE_CURRENT_LIST_DIR}/hybrid_search_task.cpp
-  #${CMAKE_CURRENT_LIST_DIR}/function.cpp
+  ${CMAKE_CURRENT_LIST_DIR}/function/function_executor.cpp
+  ${CMAKE_CURRENT_LIST_DIR}/function/bm25_function.cpp
 )
 
 target_link_libraries(

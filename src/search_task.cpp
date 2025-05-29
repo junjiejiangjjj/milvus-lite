@@ -178,6 +178,7 @@ SearchTask::Process(::milvus::proto::plan::PlanNode* plan,
         return Status::ParameterInvalid();
     }
 
+    // gen placeholder_group by function
     placeholder_group->assign(search_request_->placeholder_group());
     nqs->push_back(search_request_->nq());
     topks->push_back(vector_anns->query_info().topk());

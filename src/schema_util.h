@@ -156,6 +156,16 @@ GetOutputFieldsIds(const std::vector<std::string>& output_fields,
                    const ::milvus::proto::schema::CollectionSchema& schema,
                    std::vector<int64_t>* ids);
 
+inline void
+SparseVectorToByte(const SparseVector& vec, std::string* buf) {
+    for (const auto& it : vec) {
+        uint32_t k = it.first;
+        float v = it.second;
+        buf->append(reinterpret_cast<const char*>(&k), sizeof(k));
+        buf->append(reinterpret_cast<const char*>(&v), sizeof(v));
+    }
+}
+
 }  // namespace schema_util
 
 }  // namespace milvus::local
