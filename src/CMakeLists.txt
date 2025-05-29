@@ -73,6 +73,8 @@ target_link_libraries(
   milite
 )
 
+add_subdirectory(function)
+
 if(ENABLE_UNIT_TESTS)
   add_subdirectory(unittest)
 endif()
