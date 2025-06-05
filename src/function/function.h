@@ -15,6 +15,7 @@
 #pragma once
 
 #include <sys/types.h>
+#include <cstdint>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -116,6 +117,20 @@ class TransformFunctionBase {
     const milvus::proto::schema::FieldSchema*
     GetFunctionOutputFieldSchema(uint i) {
         return meta_->output_fields_[i];
+    }
+
+    const milvus::proto::schema::FieldSchema*
+    GetFunctioninputFieldSchema(uint i) {
+        return meta_->input_fields_[i];
+    }
+
+    const std::set<int64_t>
+    GetInputFieldIDs() {
+        std::set<int64_t> field_ids;
+        for (const auto& f : meta_->input_fields_) {
+            field_ids.insert(f->fieldid());
+        }
+        return field_ids;
     }
 
  protected:

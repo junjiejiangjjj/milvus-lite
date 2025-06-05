@@ -33,8 +33,9 @@ class FunctionExecutor : NonCopyableNonMovable {
     virtual ~FunctionExecutor() = default;
 
  private:
-    explicit FunctionExecutor(std::unique_ptr<TransformFunctionBase> function)
-        : function_(std::move(function)) {
+    explicit FunctionExecutor(
+        std::vector<std::unique_ptr<TransformFunctionBase>> functions)
+        : functions_(std::move(functions)) {
     }
 
  public:
@@ -45,9 +46,17 @@ class FunctionExecutor : NonCopyableNonMovable {
     ProcessSearch(milvus::proto::milvus::SearchRequest* search);
 
  private:
+    Status
+    ProcessSingeFunction(milvus::proto::milvus::InsertRequest* insert,
+                         const std::unique_ptr<TransformFunctionBase>& f);
+
+ public:
     static std::pair<Status, std::unique_ptr<FunctionExecutor>>
-    Create(milvus::proto::schema::CollectionSchema* schema,
-           const ::milvus::proto::schema::FieldSchema& ann_field);
+    Create(const milvus::proto::schema::CollectionSchema* schema,
+           std::string function_name);
+
+    static std::pair<Status, std::unique_ptr<FunctionExecutor>>
+    Create(const milvus::proto::schema::CollectionSchema* schema);
 
  private:
     static std::pair<Status, std::unique_ptr<TransformFunctionBase>>
@@ -56,7 +65,8 @@ class FunctionExecutor : NonCopyableNonMovable {
         const milvus::proto::schema::FunctionSchema* function_schema);
 
  private:
-    std::unique_ptr<TransformFunctionBase> function_;
+    const std::vector<std::unique_ptr<TransformFunctionBase>> functions_;
+    //std::unique_ptr<TransformFunctionBase> function_;
 };
 
 }  // namespace milvus::local::function

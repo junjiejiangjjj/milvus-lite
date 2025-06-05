@@ -19,46 +19,73 @@
 #include <string>
 
 #include <iostream>
+#include <vector>
+#include "common.h"
 
 namespace milvus::local::function {
 
-struct Stats {
-    Stats() {};
+class Stats {
+ public:
+    Stats() = default;
+    ~Stats() = default;
     Stats(const std::string& name) : output_field_name(name) {
     }
+
+ public:
+    void
+    Add(const std::string& embd) {
+        auto pos = embd.c_str();
+        auto end = embd.c_str() + embd.size();
+        for (; pos < end; pos += 8) {
+            const uint32_t key = *(reinterpret_cast<const uint32_t*>(pos));
+            const float freq = *(reinterpret_cast<const float*>(pos + 4));
+            rows_contain_token[key] += 1;
+            token_num += int(freq);
+        }
+        rows_num += 1;
+    }
+
+    void
+    Remove(const std::string& embd) {
+        auto pos = embd.c_str();
+        auto end = embd.c_str() + embd.size();
+        for (; pos < end; pos += 8) {
+            const uint32_t key = *(reinterpret_cast<const uint32_t*>(pos));
+            const float freq = *(reinterpret_cast<const float*>(pos + 4));
+            rows_contain_token[key] -= 1;
+            token_num -= int(freq);
+        }
+        rows_num += 1;
+    }
+
+ private:
     std::string output_field_name;
     std::map<uint32_t, int32_t> rows_contain_token;
-    std::map<std::string, std::string> contexts;
     int32_t token_num = 0;
     int32_t rows_num = 0;
 };
 
-class StatDict {
+class BM25Stats : NonCopyableNonMovable {
  public:
-    static StatDict&
-    Instance() {
-        static StatDict dict;
-        return dict;
-    }
-    StatDict(const StatDict&) = delete;
-    StatDict&
-    operator=(const StatDict&) = delete;
-
-    std::map<std::string, Stats> stats_dict;
+    ~BM25Stats() = default;
 
  private:
-    StatDict() {};
-};
+    BM25Stats() = default;
 
-inline void
-DebugPrint(const Stats& stat) {
-    std::cout << "name: " << stat.output_field_name << std::endl;
-    std::cout << "token num: " << stat.token_num << std::endl;
-    std::cout << "rows num: " << stat.rows_num << std::endl;
-    std::cout << "token dict" << std::endl;
-    for (auto kv : stat.rows_contain_token) {
-        std::cout << kv.first << "/t" << kv.second << std::endl;
+ public:
+    static BM25Stats&
+    Instance() {
+        static BM25Stats instance;
+        return instance;
     }
-}
+
+ public:
+    void
+    Add(std::vector<std::string>) {
+    }
+
+ private:
+    std::map<std::string, std::map<std::string, Stats>> bm25_stats_;
+};
 
 }  // namespace milvus::local::function

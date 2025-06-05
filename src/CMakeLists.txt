@@ -14,9 +14,9 @@
 
 include_directories(${CMAKE_CURRENT_LIST_DIR})
 add_library(milite ${LITE_BUILD_TYPE}
-  ${CMAKE_CURRENT_LIST_DIR}/collection_meta.cpp
-  ${CMAKE_CURRENT_LIST_DIR}/collection_data.cpp
-  ${CMAKE_CURRENT_LIST_DIR}/storage.cpp
+  ${CMAKE_CURRENT_LIST_DIR}/storage/collection_meta.cpp
+  ${CMAKE_CURRENT_LIST_DIR}/storage/collection_data.cpp
+  ${CMAKE_CURRENT_LIST_DIR}/storage/storage.cpp
   ${CMAKE_CURRENT_LIST_DIR}/timer.cpp
   ${CMAKE_CURRENT_LIST_DIR}/index.cpp
   ${CMAKE_CURRENT_LIST_DIR}/milvus_local.cpp

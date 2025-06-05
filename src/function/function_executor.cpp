@@ -14,7 +14,9 @@
 
 #include "function/function_executor.h"
 #include <memory>
+#include <set>
 #include <utility>
+#include <vector>
 #include "common.h"
 #include "function/bm25_function.h"
 #include "function/function_util.h"
@@ -24,30 +26,52 @@
 namespace milvus::local::function {
 
 std::pair<Status, std::unique_ptr<FunctionExecutor>>
-FunctionExecutor::Create(
-    milvus::proto::schema::CollectionSchema* schema,
-    const ::milvus::proto::schema::FieldSchema& ann_field) {
+FunctionExecutor::Create(const milvus::proto::schema::CollectionSchema* schema,
+                         std::string function_name) {
     for (const auto& f_schemn : schema->functions()) {
-        if (f_schemn.output_field_names(0) == ann_field.name()) {
+        if (f_schemn.output_field_names(0) == function_name) {
             auto [s, f] = CreateFunction(schema, &f_schemn);
             if (!s.IsOk()) {
                 return std::make_pair(s, nullptr);
             }
-
+            std::vector<std::unique_ptr<TransformFunctionBase>> functions_;
+            functions_.emplace_back(std::move(f));
             std::unique_ptr<FunctionExecutor> executor(
-                new FunctionExecutor(std::move(f)));
-            return std::make_pair(Status::Ok(), std::move(executor));
+                new FunctionExecutor(std::move(functions_)));
         }
     }
-    return std::make_pair(Status::ParameterInvalid("No function's output is {}",
-                                                   ann_field.name()),
-                          nullptr);
+    return std::make_pair(
+        Status::ParameterInvalid("No function's output is {}", function_name),
+        nullptr);
+}
+
+std::pair<Status, std::unique_ptr<FunctionExecutor>>
+FunctionExecutor::Create(
+    const milvus::proto::schema::CollectionSchema* schema) {
+    std::vector<std::unique_ptr<TransformFunctionBase>> functions_;
+    for (const auto& f_schemn : schema->functions()) {
+        auto [s, f] = CreateFunction(schema, &f_schemn);
+        if (!s.IsOk()) {
+            return std::make_pair(s, nullptr);
+        }
+        functions_.emplace_back(std::move(f));
+    }
+    std::unique_ptr<FunctionExecutor> executor(
+        new FunctionExecutor(std::move(functions_)));
+    return std::make_pair(Status::Ok(), std::move(executor));
 }
 
 std::pair<Status, std::unique_ptr<TransformFunctionBase>>
-CreateFunction(const milvus::proto::schema::CollectionSchema* schema,
-               const milvus::proto::schema::FunctionSchema* function_schema) {
+FunctionExecutor::CreateFunction(
+    const milvus::proto::schema::CollectionSchema* schema,
+    const milvus::proto::schema::FunctionSchema* function_schema) {
     if (function_schema->type() == milvus::proto::schema::FunctionType::BM25) {
+        auto [s, f] = BM25Function::NewBM25Function(schema, function_schema);
+        if (!s.IsOk()) {
+            return std::make_pair(s, nullptr);
+        }
+        return std::make_pair(Status::Ok(), std::move(f));
+
     } else {
         return std::make_pair(
             Status::ParameterInvalid("Unsupported function: {}",
@@ -55,16 +79,30 @@ CreateFunction(const milvus::proto::schema::CollectionSchema* schema,
                                          function_schema->type())),
             nullptr);
     }
-    auto [s, f] = BM25Function::NewBM25Function(schema, function_schema);
-    if (!s.IsOk()) {
-        return std::make_pair(s, nullptr);
-    }
-    return std::make_pair(Status::Ok(), std::move(f));
 }
 
 Status
 FunctionExecutor::ProcessInsert(milvus::proto::milvus::InsertRequest* insert) {
+    for (const auto& f : functions_) {
+        CHECK_STATUS(ProcessSingeFunction(insert, f), "");
+    }
     return Status::Ok();
+}
+
+Status
+FunctionExecutor::ProcessSingeFunction(
+    milvus::proto::milvus::InsertRequest* insert,
+    const std::unique_ptr<TransformFunctionBase>& f) {
+    auto field_ids = f->GetInputFieldIDs();
+
+    std::vector<milvus::proto::schema::FieldData*> inputs;
+    for (auto field : insert->fields_data()) {
+        if (field_ids.find(field.field_id()) != field_ids.end()) {
+            inputs.emplace_back(&field);
+        }
+    }
+    std::vector<milvus::proto::schema::FieldData> outputs;
+    return f->ProcessInsert(inputs, &outputs);
 }
 
 Status
@@ -79,7 +117,7 @@ FunctionExecutor::ProcessSearch(milvus::proto::milvus::SearchRequest* search) {
     }
 
     milvus::proto::common::PlaceholderGroup output;
-    CHECK_STATUS(function_->ProcessSearch(ph_group, &output), "");
+    CHECK_STATUS(functions_[0]->ProcessSearch(ph_group, &output), "");
     search->mutable_placeholder_group()->assign(output.SerializeAsString());
     return Status::Ok();
 }

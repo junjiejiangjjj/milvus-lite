@@ -166,6 +166,16 @@ SparseVectorToByte(const SparseVector& vec, std::string* buf) {
     }
 }
 
+inline bool
+HasFunction(const ::milvus::proto::schema::CollectionSchema& schema) {
+    return !schema.functions().empty();
+}
+
+inline bool
+HasBM25Function(const ::milvus::proto::schema::CollectionSchema& schema) {
+    return true;
+}
+
 }  // namespace schema_util
 
 }  // namespace milvus::local
