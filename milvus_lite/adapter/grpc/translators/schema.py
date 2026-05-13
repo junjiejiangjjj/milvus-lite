@@ -258,7 +258,7 @@ def _decode_default_value(proto_field, dtype: DataType) -> object | None:
         if which in ("long_data", "timestamptz_data"):
             return int(value)
         if which == "string_data":
-            return parse_timestamptz(value)
+            return str(value)
     return value
 
 

@@ -39,8 +39,7 @@ def parse_timestamptz(value: Any, default_timezone: str | None = None) -> int:
     - ISO 8601 string with an offset or ``Z`` suffix
 
     Naive strings/datetimes are rejected unless ``default_timezone`` is
-    provided. This leaves room for Milvus-compatible database/collection
-    timezone properties without silently guessing in the MVP.
+    provided by collection/request timezone properties.
     """
     if isinstance(value, bool):
         raise SchemaValidationError("TIMESTAMPTZ value must not be bool")
@@ -54,6 +53,17 @@ def parse_timestamptz(value: Any, default_timezone: str | None = None) -> int:
         f"TIMESTAMPTZ value must be ISO string, aware datetime, or int microseconds; "
         f"got {type(value).__name__}"
     )
+
+
+def validate_timezone_name(value: Any) -> str:
+    """Validate and normalize a collection/request timezone property."""
+    if not isinstance(value, str) or not value:
+        raise SchemaValidationError("timezone property must be a non-empty string")
+    try:
+        ZoneInfo(value)
+    except ZoneInfoNotFoundError as e:
+        raise SchemaValidationError(f"unknown timezone {value!r}") from e
+    return value
 
 
 def datetime_to_unix_micros(value: datetime) -> int:
@@ -87,6 +97,42 @@ def micros_to_iso_z(value: Any) -> str | None:
     if text.endswith(".000000Z"):
         text = text.replace(".000000Z", "Z")
     return text
+
+
+def extract_time_fields(
+    value: Any,
+    fields: list[str],
+    timezone_name: str = "UTC",
+) -> list[int] | None:
+    """Extract TIMESTAMPTZ components in the requested timezone."""
+    dt = micros_to_utc_datetime(value)
+    if dt is None:
+        return None
+    tz = ZoneInfo(validate_timezone_name(timezone_name))
+    local = dt.astimezone(tz)
+    out: list[int] = []
+    for field in fields:
+        key = field.casefold()
+        if key == "year":
+            out.append(local.year)
+        elif key == "month":
+            out.append(local.month)
+        elif key == "day":
+            out.append(local.day)
+        elif key == "hour":
+            out.append(local.hour)
+        elif key == "minute":
+            out.append(local.minute)
+        elif key == "second":
+            out.append(local.second)
+        elif key == "microsecond":
+            out.append(local.microsecond)
+        else:
+            raise SchemaValidationError(
+                f"unsupported time_fields component {field!r}; supported: "
+                "year, month, day, hour, minute, second, microsecond"
+            )
+    return out
 
 
 def parse_interval_micros(value: str) -> int:

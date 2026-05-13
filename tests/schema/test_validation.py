@@ -235,6 +235,53 @@ def test_timestamptz_rejects_naive_string():
         }, schema)
 
 
+def test_timestamptz_uses_collection_timezone_for_naive_string():
+    schema = CollectionSchema(
+        fields=[
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(name="vec", dtype=DataType.FLOAT_VECTOR, dim=2),
+            FieldSchema(name="tsz", dtype=DataType.TIMESTAMPTZ),
+        ],
+        properties={"timezone": "Asia/Shanghai"},
+    )
+    validate_schema(schema)
+    rec = {
+        "id": 1,
+        "vec": [0.1, 0.2],
+        "tsz": "2025-01-01T00:00:00",
+    }
+
+    validate_record(rec, schema)
+
+    assert rec["tsz"] == parse_timestamptz("2024-12-31T16:00:00Z")
+
+
+def test_timestamptz_default_uses_collection_timezone():
+    schema = CollectionSchema(
+        fields=[
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+            FieldSchema(name="vec", dtype=DataType.FLOAT_VECTOR, dim=2),
+            FieldSchema(
+                name="tsz",
+                dtype=DataType.TIMESTAMPTZ,
+                default_value="2025-01-01T00:00:00",
+            ),
+        ],
+        properties={"timezone": "Asia/Shanghai"},
+    )
+
+    validate_schema(schema)
+
+    assert schema.fields[2].default_value == parse_timestamptz("2024-12-31T16:00:00Z")
+
+
+def test_schema_rejects_unknown_timezone():
+    schema = _basic_schema(properties={"timezone": "No/Such_Zone"})
+
+    with pytest.raises(SchemaValidationError, match="unknown timezone"):
+        validate_schema(schema)
+
+
 def test_record_not_dict():
     with pytest.raises(SchemaValidationError, match="must be a dict"):
         validate_record(["id", "doc1"], _basic_schema())

@@ -13,7 +13,7 @@ from milvus_lite.schema.types import (
     Function,
     FunctionType,
 )
-from milvus_lite.schema.timestamptz import parse_timestamptz
+from milvus_lite.schema.timestamptz import parse_timestamptz, validate_timezone_name
 
 # Reserved column names — users may not name fields these.
 #
@@ -69,6 +69,13 @@ def validate_schema(schema: CollectionSchema) -> None:
     """
     if not schema.fields:
         raise SchemaValidationError("schema has no fields")
+    if not isinstance(schema.properties, dict):
+        raise SchemaValidationError("schema properties must be a dict")
+
+    default_timezone = None
+    if "timezone" in schema.properties:
+        default_timezone = validate_timezone_name(schema.properties["timezone"])
+        schema.properties["timezone"] = default_timezone
 
     seen_names: set[str] = set()
     pk_fields: list[FieldSchema] = []
@@ -108,7 +115,10 @@ def validate_schema(schema: CollectionSchema) -> None:
                     f"ARRAY field {f.name!r} requires element_type"
                 )
         if f.dtype == DataType.TIMESTAMPTZ and f.default_value is not None:
-            f.default_value = parse_timestamptz(f.default_value)
+            f.default_value = parse_timestamptz(
+                f.default_value,
+                default_timezone=default_timezone,
+            )
 
     if len(pk_fields) == 0:
         raise SchemaValidationError("schema has no primary key field")
@@ -306,6 +316,7 @@ def validate_record(record: dict, schema: CollectionSchema) -> None:
                 record[f.name] = copy.deepcopy(f.default_value)
 
     schema_field_names = {f.name for f in schema.fields}
+    default_timezone = schema.properties.get("timezone")
     pk = _find_pk(schema)
     func_output_names = _function_output_field_names(schema)
 
@@ -396,7 +407,10 @@ def validate_record(record: dict, schema: CollectionSchema) -> None:
             continue
         if f.dtype == DataType.TIMESTAMPTZ:
             try:
-                record[f.name] = parse_timestamptz(value)
+                record[f.name] = parse_timestamptz(
+                    value,
+                    default_timezone=default_timezone,
+                )
             except SchemaValidationError as e:
                 raise SchemaValidationError(
                     f"field {f.name!r} value {value!r} does not match dtype {f.dtype}"

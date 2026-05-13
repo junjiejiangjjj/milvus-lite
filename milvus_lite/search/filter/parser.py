@@ -71,9 +71,15 @@ _CMP_TEXT = {
 class Parser:
     """Recursive-descent parser; instances are single-use (one parse call)."""
 
-    def __init__(self, tokens: List[Token], source: str) -> None:
+    def __init__(
+        self,
+        tokens: List[Token],
+        source: str,
+        default_timezone: str | None = None,
+    ) -> None:
         self.tokens = tokens
         self.source = source
+        self.default_timezone = default_timezone
         self.pos = 0
 
     # ── public entry ────────────────────────────────────────────
@@ -536,7 +542,10 @@ class Parser:
             )
         self._consume()
         try:
-            value = parse_timestamptz(value_tok.value)
+            value = parse_timestamptz(
+                value_tok.value,
+                default_timezone=self.default_timezone,
+            )
         except Exception as e:
             raise FilterParseError(str(e), self.source, value_tok.pos) from e
         return TimestampLit(value=value, pos=iso_tok.pos)
@@ -657,11 +666,11 @@ def left_pos_of(node: Expr) -> int:
     return getattr(node, "pos", 0)
 
 
-def parse_expr(source: str) -> Expr:
+def parse_expr(source: str, default_timezone: str | None = None) -> Expr:
     """Public entry point: lex + parse a single expression.
 
     Raises:
         FilterParseError: on lex or parse errors. Always carries source + pos.
     """
     tokens = tokenize(source)
-    return Parser(tokens, source).parse()
+    return Parser(tokens, source, default_timezone=default_timezone).parse()

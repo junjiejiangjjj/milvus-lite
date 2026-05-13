@@ -252,6 +252,35 @@ def test_encode_timestamptz_round_trip():
     assert records[1]["tsz"] is None
 
 
+def test_encode_timestamptz_time_fields():
+    schema = CollectionSchema(fields=[
+        FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+        FieldSchema(name="vec", dtype=DataType.FLOAT_VECTOR, dim=2),
+        FieldSchema(name="tsz", dtype=DataType.TIMESTAMPTZ, nullable=True),
+    ])
+    ts = parse_timestamptz("2024-12-31T16:00:01.123456Z")
+
+    fields_data = records_to_fields_data(
+        [
+            {"id": 1, "vec": [0.1, 0.2], "tsz": ts},
+            {"id": 2, "vec": [0.2, 0.3], "tsz": None},
+        ],
+        schema,
+        output_fields=["tsz"],
+        time_fields="year, month, day, hour, minute, second, microsecond",
+        timezone="Asia/Shanghai",
+    )
+
+    tsz_fd = next(fd for fd in fields_data if fd.field_name == "tsz")
+    assert tsz_fd.type == 22
+    assert tsz_fd.scalars.array_data.element_type == 5
+    assert list(tsz_fd.valid_data) == [True, False]
+    assert list(tsz_fd.scalars.array_data.data[0].long_data.data) == [
+        2025, 1, 1, 0, 0, 1, 123456,
+    ]
+    assert list(tsz_fd.scalars.array_data.data[1].long_data.data) == []
+
+
 def test_encode_output_fields_subset():
     schema = _schema_basic()
     records_in = [

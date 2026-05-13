@@ -39,7 +39,11 @@ from pymilvus.grpc_gen import schema_pb2
 
 from milvus_lite.exceptions import SchemaValidationError
 from milvus_lite.schema.types import CollectionSchema, DataType
-from milvus_lite.schema.timestamptz import micros_to_iso_z, parse_timestamptz
+from milvus_lite.schema.timestamptz import (
+    extract_time_fields,
+    micros_to_iso_z,
+    parse_timestamptz,
+)
 
 
 # ── Milvus DataType enum (int) → name and category. We use the int
@@ -82,6 +86,7 @@ def _milvus_type_name(dtype_int: int) -> str:
 def fields_data_to_records(
     fields_data,
     num_rows: int,
+    default_timezone: str | None = None,
 ) -> List[Dict[str, Any]]:
     """Transpose Milvus columnar fields_data into row-wise records.
 
@@ -105,7 +110,11 @@ def fields_data_to_records(
     records: List[Dict[str, Any]] = [{} for _ in range(num_rows)]
 
     for fd in fields_data:
-        column = _extract_column(fd, num_rows)
+        column = _extract_column(
+            fd,
+            num_rows,
+            default_timezone=default_timezone,
+        )
 
         # Dynamic field handling: pymilvus packs dynamic fields into a
         # single FieldData with is_dynamic=True (or field_name="$meta")
@@ -134,7 +143,11 @@ def fields_data_to_records(
     return records
 
 
-def _extract_column(fd, num_rows: int) -> List[Any]:
+def _extract_column(
+    fd,
+    num_rows: int,
+    default_timezone: str | None = None,
+) -> List[Any]:
     """Pull a single FieldData out as a length-num_rows Python list.
 
     Handles the scalar/vector dispatch, validates length, and
@@ -197,7 +210,13 @@ def _extract_column(fd, num_rows: int) -> List[Any]:
             )
 
     if dtype_int == 26:
-        column = [None if v is None else parse_timestamptz(v) for v in column]
+        column = [
+            None if v is None else parse_timestamptz(
+                v,
+                default_timezone=default_timezone,
+            )
+            for v in column
+        ]
 
     return column
 
@@ -351,6 +370,8 @@ def records_to_fields_data(
     records: List[Dict[str, Any]],
     schema: CollectionSchema,
     output_fields: Optional[List[str]] = None,
+    time_fields: Optional[List[str] | str] = None,
+    timezone: str | None = None,
 ) -> List:
     """Build columnar FieldData list from row-wise records.
 
@@ -380,12 +401,22 @@ def records_to_fields_data(
         emit_names = [f.name for f in schema.fields if f.name in emit]
 
     field_by_name = {f.name: f for f in schema.fields}
+    time_field_parts = _parse_time_fields(time_fields)
+    time_field_timezone = timezone or schema.properties.get("timezone") or "UTC"
 
     fields_data: List = []
     for fname in emit_names:
         fschema = field_by_name[fname]
         column = [r.get(fname) for r in records]
-        fd = _build_field_data(fname, fschema, column)
+        if fschema.dtype == DataType.TIMESTAMPTZ and time_field_parts:
+            fd = _build_timestamptz_time_fields_data(
+                fname,
+                column,
+                time_field_parts,
+                time_field_timezone,
+            )
+        else:
+            fd = _build_field_data(fname, fschema, column)
         fields_data.append(fd)
 
     # Emit $meta JSON column for dynamic fields.
@@ -411,6 +442,39 @@ def records_to_fields_data(
         fields_data.append(fd)
 
     return fields_data
+
+
+def _parse_time_fields(value: Optional[List[str] | str]) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        import re
+        return [p for p in re.split(r"[,\s]+", value.strip()) if p]
+    out: List[str] = []
+    for item in value:
+        if isinstance(item, str):
+            out.extend(_parse_time_fields(item))
+    return out
+
+
+def _build_timestamptz_time_fields_data(
+    name: str,
+    column: List[Any],
+    time_fields: List[str],
+    timezone: str,
+):
+    fd = schema_pb2.FieldData()
+    fd.field_name = name
+    fd.type = 22  # Array
+    has_nulls = any(v is None for v in column)
+    if has_nulls:
+        fd.valid_data.extend([v is not None for v in column])
+    fd.scalars.array_data.element_type = 5  # Int64
+    for v in column:
+        row_sf = fd.scalars.array_data.data.add()
+        values = extract_time_fields(v, time_fields, timezone) if v is not None else []
+        row_sf.long_data.data.extend(values or [])
+    return fd
 
 
 def _build_field_data(name, fschema, column):

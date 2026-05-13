@@ -72,6 +72,7 @@ class CollectionSchema:
     version: int = 1
     enable_dynamic_field: bool = False
     functions: List[Function] = field(default_factory=list)
+    properties: Dict[str, Any] = field(default_factory=dict)
 
 
 # DataType -> PyArrow type mapping.

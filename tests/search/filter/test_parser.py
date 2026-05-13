@@ -72,6 +72,16 @@ def test_timestamp_literal():
     assert e.value > 0
 
 
+def test_timestamp_literal_uses_default_timezone():
+    e = parse_expr(
+        "ISO '2025-01-01T00:00:00'",
+        default_timezone="Asia/Shanghai",
+    )
+    expected = parse_expr("ISO '2024-12-31T16:00:00Z'")
+    assert isinstance(e, TimestampLit)
+    assert e.value == expected.value
+
+
 def test_interval_literal():
     e = parse_expr("INTERVAL 'P2DT6H'")
     assert isinstance(e, IntervalLit)

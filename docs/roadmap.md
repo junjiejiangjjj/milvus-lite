@@ -916,7 +916,7 @@ Search → top-N candidates → group by group_by_field → top group_size per g
 | Geometry types | WKT format + spatial queries |
 | Struct/Array nesting | Structured array fields |
 | MinHash vectors | MinHash vector type |
-| TimestampTZ timezone hierarchy | Database/collection/query-level timezone overrides for naive timestamp literals |
+| TimestampTZ timezone hierarchy | Database-level timezone defaults for naive timestamp literals |
 | Clustering Key | Clustered compaction |
 | Warmup | Collection pre-warming |
 | MMap | Memory-mapped storage |
@@ -972,7 +972,7 @@ This section tracks Milvus features that are worth bringing into MilvusLite afte
 
 | Feature | Milvus Surface | Why It Matters | MilvusLite Design Direction | Acceptance Criteria |
 |---|---|---|---|---|
-| `TIMESTAMPTZ` follow-ups | Timezone-aware timestamp scalar type | Basic TIMESTAMPTZ storage, UTC normalization, gRPC FieldData, and ISO/INTERVAL filters are implemented. Remaining work is Milvus's timezone hierarchy and index acceleration. | Add database/collection/query-level `timezone` properties for naive timestamp parsing. Later integrate with scalar index or `STL_SORT` equivalent. | Naive timestamp literals respect operation-level timezone precedence; indexed timestamp range filters return the same rows as scan mode. |
+| `TIMESTAMPTZ` follow-ups | Timezone-aware timestamp scalar type | Basic TIMESTAMPTZ storage, UTC normalization, gRPC FieldData, collection/request-level timezone parsing, `time_fields`, and ISO/INTERVAL filters are implemented. Remaining work is database timezone defaults and index acceleration. | Add database-level `timezone` properties for naive timestamp parsing. Later integrate with scalar index or `STL_SORT` equivalent. | Naive timestamp literals respect operation-level timezone precedence; indexed timestamp range filters return the same rows as scan mode. |
 | Geometry | `GEOMETRY`, `ST_*` spatial predicates | Useful for geo-constrained vector search, but domain-specific and optional. | Start with optional `shapely`-backed brute-force predicates. Add segment-level R-tree only if benchmarks justify it. | Geometry fields can be inserted, persisted, and filtered with a small supported subset such as contains/within/intersects. |
 | Binary Vector Indexes | `BIN_FLAT`, `BIN_IVF_FLAT` | Complements `BINARY_VECTOR`; useful for compatibility but less common than float/sparse vectors in RAG. | Add brute-force Hamming/Jaccard first. Add FAISS binary indexes only after storage and metric semantics are stable. | Binary search results match brute-force reference for supported metrics. |
 | SPARSE_WAND | Sparse vector accelerated retrieval | Useful when BM25/sparse collections grow, but depends on sparse index maturity. | Add WAND-style upper-bound pruning inside `SparseInvertedIndex` without changing public API. | Sparse search returns the same top-k as exhaustive sparse scoring on test corpora. |

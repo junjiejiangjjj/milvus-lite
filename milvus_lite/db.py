@@ -92,11 +92,17 @@ class MilvusLite:
         self,
         name: str,
         schema: CollectionSchema,
+        properties: Optional[Dict[str, Any]] = None,
     ) -> Collection:
         """Create a new Collection. Raises if a Collection with this
         name already exists."""
         self._check_open()
         self._validate_name(name)
+
+        if properties:
+            merged = dict(schema.properties)
+            merged.update(properties)
+            schema.properties = merged
 
         # Validate the schema BEFORE touching disk so we don't leave a
         # half-initialized collection directory if validation fails.
@@ -249,6 +255,26 @@ class MilvusLite:
         shutil.rmtree(col_dir, ignore_errors=False)
         os.makedirs(col_dir, exist_ok=False)
         save_schema(schema, name, os.path.join(col_dir, SCHEMA_FILENAME))
+
+    def alter_collection_properties(
+        self,
+        name: str,
+        properties: Optional[Dict[str, Any]] = None,
+        delete_keys: Optional[List[str]] = None,
+    ) -> None:
+        """Update mutable collection properties and persist schema.json."""
+        self._check_open()
+        name = self.resolve_collection_name(name)
+        if not self.has_collection(name):
+            raise CollectionNotFoundError(f"collection {name!r} does not exist")
+
+        col = self.get_collection(name)
+        col.alter_properties(properties=properties, delete_keys=delete_keys)
+        save_schema(
+            col.schema,
+            name,
+            os.path.join(self._collection_dir(name), SCHEMA_FILENAME),
+        )
 
     def create_alias(self, collection_name: str, alias: str) -> None:
         """Create a collection alias."""
