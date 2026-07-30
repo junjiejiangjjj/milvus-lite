@@ -1,10 +1,12 @@
 """Tests for storage/wal.py — WAL write/recover round-trip, lifecycle, truncation."""
 
 import os
+import struct
 
 import pyarrow as pa
 import pytest
 
+from milvus_lite.exceptions import WALCorruptedError
 from milvus_lite.schema.types import CollectionSchema, DataType, FieldSchema
 from milvus_lite.schema.arrow_builder import build_wal_data_schema, build_wal_delta_schema
 from milvus_lite.storage.wal import WAL, _read_wal_file, _cleanup_old_wals
@@ -67,6 +69,39 @@ def _make_delta_batch(wal_delta_schema) -> pa.RecordBatch:
         },
         schema=wal_delta_schema,
     )
+
+
+def _corrupt_partition_offsets(path: str) -> None:
+    """Break the two-row _partition offsets without breaking IPC decoding."""
+    with open(path, "rb") as f:
+        contents = bytearray(f.read())
+
+    valid_offsets = struct.pack("<iii", 0, 8, 16)
+    offset = contents.index(valid_offsets)
+    contents[offset : offset + len(valid_offsets)] = struct.pack("<iii", 0, 100, 16)
+
+    with open(path, "wb") as f:
+        f.write(contents)
+
+
+def _truncate_inside_second_batch(contents: bytes) -> bytes:
+    """Find a suffix truncation where batch 1 survives and batch 2 is partial."""
+    for end in range(len(contents) - 1, 0, -1):
+        candidate = contents[:end]
+        try:
+            reader = pa.ipc.open_stream(pa.BufferReader(candidate))
+            reader.read_next_batch()
+        except (pa.ArrowInvalid, OSError, StopIteration):
+            continue
+
+        try:
+            reader.read_next_batch()
+        except pa.ArrowInvalid:
+            return candidate
+        except (OSError, StopIteration):
+            continue
+
+    pytest.fail("could not find a truncation point inside the second WAL batch")
 
 
 # ---------------------------------------------------------------------------
@@ -168,6 +203,33 @@ def test_multiple_batches_recover(wal_dir, wal_data_schema, wal_delta_schema):
     assert data_batches[1].num_rows == 2
 
 
+def test_decoded_invalid_batch_raises_wal_corrupted(
+    wal_dir, wal_data_schema, wal_delta_schema
+):
+    wal = WAL(wal_dir, wal_data_schema, wal_delta_schema, wal_number=1)
+    wal.write_insert(_make_data_batch(wal_data_schema))
+    path = wal.data_path
+    wal._data_writer.close()
+    wal._data_sink.close()
+
+    _corrupt_partition_offsets(path)
+
+    with pa.OSFile(path, "rb") as source:
+        reader = pa.ipc.open_stream(source)
+        batch = reader.read_next_batch()
+        batch.validate(full=False)
+        with pytest.raises(pa.ArrowInvalid, match="Offset invariant failure"):
+            batch.validate(full=True)
+
+    with pytest.raises(WALCorruptedError) as exc_info:
+        WAL.recover(wal_dir, 1)
+
+    message = str(exc_info.value)
+    assert path in message
+    assert "batch 0" in message
+    assert "Offset invariant failure" in message
+
+
 # ---------------------------------------------------------------------------
 # close_and_delete
 # ---------------------------------------------------------------------------
@@ -262,19 +324,46 @@ def test_find_wal_files_ignores_non_wal(wal_dir):
 # Truncation handling
 # ---------------------------------------------------------------------------
 
-def test_truncated_file_recovers_partial(wal_dir, wal_data_schema, wal_delta_schema):
-    """A truncated WAL file should return the batches read before truncation."""
+def test_truncated_file_recovers_partial(
+    wal_dir, wal_data_schema, wal_delta_schema, caplog
+):
+    """A partial final batch preserves the fully validated prefix."""
     wal = WAL(wal_dir, wal_data_schema, wal_delta_schema, wal_number=1)
-    wal.write_insert(_make_data_batch(wal_data_schema))
-    wal.write_insert(_make_data_batch(wal_data_schema))
-    # Don't close writer — simulate crash (no EOS marker).
-    # Forcefully close the sink to flush OS buffers.
-    wal._data_writer = None  # prevent close_and_delete from using it
+    first_batch = _make_data_batch(wal_data_schema)
+    second_batch = pa.RecordBatch.from_pydict(
+        {
+            "_seq": [3, 4],
+            "_partition": ["_default", "_default"],
+            "id": [300, 400],
+            "vec": [[0.9, 1.0, 1.1, 1.2], [1.3, 1.4, 1.5, 1.6]],
+        },
+        schema=wal_data_schema,
+    )
+    wal.write_insert(first_batch)
+    wal.write_insert(second_batch)
+    path = wal.data_path
+    wal._data_writer.close()
     wal._data_sink.close()
 
-    data_batches, _ = WAL.recover(wal_dir, 1)
-    # Should recover the 2 complete batches (missing EOS is handled gracefully)
-    assert len(data_batches) >= 1
+    with open(path, "rb") as f:
+        valid_contents = f.read()
+    truncated_contents = _truncate_inside_second_batch(valid_contents)
+    with open(path, "wb") as f:
+        f.write(truncated_contents)
+
+    with pa.OSFile(path, "rb") as source:
+        reader = pa.ipc.open_stream(source)
+        assert reader.read_next_batch().equals(first_batch)
+        with pytest.raises(pa.ArrowInvalid):
+            reader.read_next_batch()
+
+    with caplog.at_level("WARNING", logger="milvus_lite.storage.wal"):
+        data_batches, delta_batches = WAL.recover(wal_dir, 1)
+
+    assert len(data_batches) == 1
+    assert data_batches[0].equals(first_batch)
+    assert delta_batches == []
+    assert f"Stopped reading WAL {path} at batch 1" in caplog.text
 
 
 def test_corrupted_file_returns_empty(wal_dir, wal_data_schema, wal_delta_schema):

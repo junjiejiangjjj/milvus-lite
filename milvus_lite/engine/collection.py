@@ -25,6 +25,7 @@ storage layer free of engine-layer types.
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
 import threading
@@ -97,6 +98,15 @@ if False:  # TYPE_CHECKING
 # Segment cache key: (partition, relative_path) — relative_path is what
 # the manifest stores so two segments cannot collide on the same name.
 _SegmentKey = Tuple[str, str]
+
+
+def _write_locked(method):
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._write_lock:
+            return method(self, *args, **kwargs)
+
+    return wrapper
 
 
 def _validate_scalar_index_request(dtype: DataType, index_type: str) -> None:
@@ -255,6 +265,9 @@ class Collection:
         # ── 5. compaction manager ───────────────────────────────
         self._compaction_mgr = CompactionManager(data_dir, schema)
 
+        # Write lock serializes mutations to WAL and MemTable. It is
+        # acquired before the maintenance lock when both are needed.
+        self._write_lock: threading.RLock = threading.RLock()
         # Maintenance lock serializes mutations to manifest, segment
         # cache, and delta_index between the user thread (flush) and
         # the background worker (compaction + index build).
@@ -336,6 +349,7 @@ class Collection:
 
     # ── public API ──────────────────────────────────────────────
 
+    @_write_locked
     def insert(
         self,
         records: List[dict],
@@ -438,6 +452,7 @@ class Collection:
         ordered_pks.sort(key=lambda x: x[0])
         return [pk for _, pk in ordered_pks]
 
+    @_write_locked
     def upsert(
         self,
         records: List[dict],
@@ -517,6 +532,7 @@ class Collection:
 
         return None
 
+    @_write_locked
     def delete(
         self,
         pks: List[Any],
@@ -1272,6 +1288,7 @@ class Collection:
             or self._database_properties.get("timezone")
         )
 
+    @_write_locked
     def flush(self) -> None:
         """Force a synchronous flush of the current MemTable.
 
@@ -1782,6 +1799,7 @@ class Collection:
             self._wal.write_delete(op.batch)
             self._memtable.apply_delete(op.batch)
 
+    @_write_locked
     def _trigger_flush(self) -> None:
         """Flush pipeline — synchronous up to data persistence, then
         compaction + index build are offloaded to the background worker.
@@ -2129,6 +2147,7 @@ class Collection:
 
     # ── lifecycle ───────────────────────────────────────────────
 
+    @_write_locked
     def close(self) -> None:
         """Flush any pending state and shut down the WAL.
 

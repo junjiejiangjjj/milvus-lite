@@ -1,8 +1,8 @@
 """Concurrency stability tests for sustained mixed workloads.
 
-The engine contract is single-writer per Collection, but readers should
-remain stable while that writer inserts, upserts, deletes, flushes, and
-background compaction/index work runs.
+The engine serializes writers per Collection, while readers should remain
+stable as writers insert, upsert, delete, and flush and background
+compaction/index work runs.
 """
 
 from __future__ import annotations

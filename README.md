@@ -276,7 +276,7 @@ The command reads rows through `pymilvus` query iterators and writes BulkWriter 
 ## Known Limitations
 
 - Single process per `data_dir`; Milvus Lite uses a file lock to protect local storage.
-- The gRPC server supports concurrent reads, but writes to the same collection must be serialized; concurrent writers are not supported safely.
+- For a given collection, `insert`, `upsert`, `delete`, and `flush` operations are serialized by a per-Collection reentrant lock. Different collections can accept writes independently.
 - The gRPC adapter implements the supported local `pymilvus` workflow subset. Unsupported Milvus RPCs return `UNIMPLEMENTED`; schema alteration and partition-level load/release are not available.
 - No authentication, users, roles, RBAC, or TLS; do not expose the local gRPC server on an untrusted network.
 - No binary, float16, bfloat16, or int8 vector fields.

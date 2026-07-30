@@ -8,12 +8,10 @@ Both share the same construction path: open a MilvusLite on
 ``data_dir``, instantiate ``MilvusServicer``, register it on a
 ThreadPoolExecutor-backed grpc.server, bind to host:port, and start.
 
-Concurrency model: gRPC's threadpool dispatches requests across
-worker threads. The engine layer is single-writer per Collection,
-so concurrent reads are safe but concurrent writes against the
-same Collection are not. For Phase 10 MVP we accept that — the
-target use case is "one local Python process drives the server",
-and concurrency hardening is a separate phase.
+Concurrency model: gRPC's threadpool dispatches requests across worker
+threads. Data-write operations (insert, upsert, delete, and flush) are
+serialized per Collection by the engine. Reads do not acquire the write lock
+and can run concurrently; different Collections have independent write locks.
 
 Lifetime: ``run_server`` blocks until KeyboardInterrupt, then closes
 the MilvusLite (which releases the data_dir LOCK). The thread variant

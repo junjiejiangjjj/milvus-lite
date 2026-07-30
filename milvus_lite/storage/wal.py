@@ -8,6 +8,7 @@ first write so that unused files are never created.
 from __future__ import annotations
 
 import io
+import logging
 import os
 import re
 from typing import BinaryIO, List, Optional, Tuple
@@ -15,6 +16,10 @@ from typing import BinaryIO, List, Optional, Tuple
 import pyarrow as pa
 
 from milvus_lite.constants import SEQ_FORMAT_WIDTH, WAL_DATA_TEMPLATE, WAL_DELTA_TEMPLATE
+from milvus_lite.exceptions import WALCorruptedError
+
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -39,17 +44,48 @@ def _read_wal_file(path: str) -> List[pa.RecordBatch]:
     batches: list[pa.RecordBatch] = []
     try:
         with pa.OSFile(path, "rb") as source:
-            reader = pa.ipc.open_stream(source)
-            for batch in reader:
+            try:
+                reader = pa.ipc.open_stream(source)
+            except pa.ArrowInvalid as exc:
+                logger.warning("Cannot open WAL stream %s: %s", path, exc)
+                return []
+
+            batch_index = 0
+            while True:
+                try:
+                    batch = reader.read_next_batch()
+                except StopIteration:
+                    break
+                except pa.ArrowInvalid as exc:
+                    logger.warning(
+                        "Stopped reading WAL %s at batch %d: %s",
+                        path,
+                        batch_index,
+                        exc,
+                    )
+                    break
+                except (OSError, IOError) as exc:
+                    logger.warning(
+                        "I/O error reading WAL %s at batch %d: %s",
+                        path,
+                        batch_index,
+                        exc,
+                    )
+                    break
+
+                try:
+                    batch.validate(full=True)
+                except pa.ArrowInvalid as exc:
+                    raise WALCorruptedError(
+                        f"WAL {path} batch {batch_index}: {exc}"
+                    ) from exc
+
                 batches.append(batch)
-    except pa.ArrowInvalid:
-        # Truncated RecordBatch — keep whatever was successfully read.
-        # Open-stream succeeded (schema is fine), some later batch was cut.
-        pass
-    except (OSError, IOError):
+                batch_index += 1
+    except (OSError, IOError) as exc:
         # File-level IO error (permissions, broken pipe, etc.) — give up,
         # return whatever was read before the failure.
-        pass
+        logger.warning("I/O error opening or closing WAL %s: %s", path, exc)
     # NOTE: deliberately do NOT catch generic Exception — that would hide
     # real bugs (AttributeError / TypeError / KeyError) in the recovery path.
 

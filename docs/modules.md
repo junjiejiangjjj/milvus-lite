@@ -218,7 +218,7 @@ The following constraints apply across all modules and represent design consensu
 
 6. **MVP synchronous flush**. When `Collection.insert/delete` detects MemTable is full, it **blocks to execute** flush and returns only after flush completes. Async/background flush is deferred to the future and not included in MVP.
    - This decision affects the interface shape of MemTable / Collection / Search. Switching to async requires opening a new document to discuss lock/snapshot/RCU boundaries.
-7. **Single writer per Collection**. Collection does not do internal locking; multi-threaded concurrent writes to the same Collection within one process is undefined behavior.
+7. **Data writers are serialized per Collection**. The `insert`, `upsert`, `delete`, `flush`, and `close` critical sections acquire a per-Collection reentrant write lock, serializing the relevant sequence allocation, WAL append, MemTable apply, and triggered flush work. Different Collections remain independent.
 8. **Single process per data_dir**. `db.py` acquires `fcntl.flock(data_dir/LOCK)` at startup; if already held, it errors out immediately without waiting.
 
 **Schema / Evolution:**
