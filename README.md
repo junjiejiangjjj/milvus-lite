@@ -40,7 +40,7 @@ Milvus Lite is intended for prototyping and local workloads. For large-scale pro
 - Python 3.10 or newer
 - macOS, Linux, or Windows where the Python dependencies are available
 
-Continuous integration tests cover Linux and macOS on Python 3.10–3.13 and Windows on Python 3.10. Installation on other Windows/Python combinations depends on compatible wheels being available for dependencies such as `faiss-cpu` and `pyarrow`.
+Continuous integration tests cover Linux on Python 3.10–3.13, macOS on Python 3.12, and Windows on Python 3.10. Installation on other Windows/Python combinations depends on compatible wheels being available for dependencies such as `faiss-cpu` and `pyarrow`.
 
 Core dependencies are installed by default: `pyarrow`, `numpy`, `faiss-cpu`, and `grpcio`. `pymilvus` is intentionally not a dependency of `milvus-lite`; it installs Milvus Lite as its local backend.
 
