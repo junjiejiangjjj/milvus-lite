@@ -1788,22 +1788,29 @@ class Collection:
 
     def query(                                       # Phase 8 new method
         self,
-        expr: str,
+        expr: Optional[str] = None,
         output_fields: Optional[List[str]] = None,
         partition_names: Optional[List[str]] = None,
         limit: Optional[int] = None,
+        offset: int = 0,
+        timezone: Optional[str] = None,
+        order_by_pk: bool = False,
     ) -> List[dict]:
         """Pure scalar query (no vectors, no distance).
 
         Flow: parse_expr -> compile_expr -> assemble_candidates(no query) ->
               build_valid_mask(filter_mask=...) -> take all True rows ->
-              project output_fields -> truncate to limit.
+              optionally order by primary key -> apply offset/limit ->
+              project output_fields.
 
         Args:
-            expr: Required, filter expression (see sections 9.19-9.25)
+            expr: Optional filter expression (see sections 9.19-9.25)
             output_fields: List of fields to return, None returns all fields (excluding _seq, _partition)
             partition_names: Search scope
             limit: Maximum number of rows to return (None = unlimited)
+            offset: Number of ordered or physical rows to skip
+            timezone: Optional timezone used to interpret TIMESTAMPTZ expressions
+            order_by_pk: Sort by primary key before offset/limit; enabled by the gRPC adapter for query iterators
 
         Returns:
             List[dict], each dict is one matching record
@@ -2611,7 +2618,7 @@ def run_server(
 | `Insert` / `Upsert` | `col.insert(records, partition)` | translator: records.py — FieldData column-row transposition |
 | `Delete(ids=)` | `col.delete(pks, partition)` | |
 | `Delete(filter=)` | `col.query(filter) -> extract pk -> col.delete` | |
-| `Query` | `col.query(expr, output_fields, partition_names, limit)` or `col.get(pks, ...)` | id expression goes to get |
+| `Query` | `col.query(expr, output_fields, partition_names, limit)` or `col.get(pks, ...)` | id expression goes to get; iterator requests use PK-ordered `col.query` |
 | `Search` | `col.search(query_vectors, top_k, metric_type, partition_names, expr, output_fields)` | translator: search.py + result.py; supports exactly one public L2 Function Chain; public Function Chains reject FunctionScore/ranker and `order_by_fields` before ANN Search |
 | `HybridSearch` | existing hybrid rerank path | Public Function Chains are unsupported and rejected |
 | `CreateIndex` | `col.create_index(field, params)` | translator: index.py |
