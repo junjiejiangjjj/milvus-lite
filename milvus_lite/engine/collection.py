@@ -1131,6 +1131,7 @@ class Collection:
         limit: Optional[int] = None,
         offset: int = 0,
         timezone: Optional[str] = None,
+        order_by_pk: bool = False,
     ) -> List[dict]:
         """Pure scalar query — no vector, no distance.
 
@@ -1146,11 +1147,16 @@ class Collection:
                 The pk field is always included.
             partition_names: optional partition filter
             limit: max number of rows to return; None = unbounded
+            offset: number of matching rows to skip
+            timezone: optional timezone for TIMESTAMPTZ expressions
+            order_by_pk: sort live rows by primary key before applying
+                offset/limit. Used by cursor-based query iterators.
 
         Returns:
-            List of dicts (each a record matching the filter). Order is
-            "segments first, then MemTable" — within each source, the
-            order is the underlying iteration order. No top-k sort.
+            List of dicts (each a record matching the filter). By default,
+            order is "segments first, then MemTable" and follows each
+            source's underlying iteration order. With order_by_pk, rows are
+            returned in ascending primary-key order.
         """
         if expr is not None and not isinstance(expr, str):
             raise TypeError("query() expr must be a string or None")
@@ -1190,6 +1196,11 @@ class Collection:
         # Deferred materialization: only materialize records that pass the mask.
         effective_limit = (offset + limit) if limit is not None else None
         live_indices = np.flatnonzero(mask)
+        if order_by_pk:
+            live_indices = sorted(
+                live_indices,
+                key=lambda index: all_pks[int(index)],
+            )
         out: List[dict] = []
         for i in live_indices:
             rec = materialize_record(all_rec_sources[int(i)])

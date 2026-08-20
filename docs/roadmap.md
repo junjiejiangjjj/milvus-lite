@@ -762,7 +762,7 @@ Search → top-N candidates → group by group_by_field → top group_size per g
 
 ## Phase 16 — Iterator (query_iterator / search_iterator)
 
-**Completed.** query(expr=None) returns all records, supports pymilvus client-side pk cursor pagination and distance range pagination.
+**Completed.** query(expr=None) returns all records, supports pymilvus client-side pk cursor pagination with stable primary-key ordering, and distance range pagination.
 
 ---
 

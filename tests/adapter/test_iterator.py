@@ -8,8 +8,9 @@ Covers:
 1. query_iterator: paginate all records in batches
 2. query_iterator with filter
 3. query_iterator collects all records without duplicates
-4. search_iterator: paginate search results in batches
-5. Engine: query(expr=None) returns all records
+4. query_iterator orders VARCHAR primary keys, PK-IN filters, and offset seeks
+5. search_iterator: paginate search results in batches
+6. Engine: query(expr=None) returns all records
 """
 
 from contextlib import closing
@@ -84,6 +85,36 @@ class TestQueryAllRecords:
                 results = col.query(None, limit=5)
                 assert len(results) == 5
 
+    def test_query_order_by_pk_applies_before_pagination_and_is_opt_in(self):
+        from milvus_lite.schema.types import (
+            CollectionSchema, DataType as LDT, FieldSchema,
+        )
+        from milvus_lite.engine.collection import Collection
+
+        with tempfile.TemporaryDirectory() as d:
+            schema = CollectionSchema(fields=[
+                FieldSchema(
+                    name="id", dtype=LDT.VARCHAR, is_primary=True,
+                    max_length=8,
+                ),
+                FieldSchema(name="vec", dtype=LDT.FLOAT_VECTOR, dim=4),
+            ])
+            with closing(Collection(name="t", data_dir=d, schema=schema)) as col:
+                inserted_ids = ["f", "a", "e", "b", "d", "c"]
+                col.insert([
+                    {"id": pk, "vec": [float(i), 0, 0, 0]}
+                    for i, pk in enumerate(inserted_ids)
+                ])
+
+                # Regular query keeps its existing physical-order semantics.
+                assert [r["id"] for r in col.query(None)] == inserted_ids
+                # Iterator pagination requires sorting before offset/limit.
+                rows = col.query(
+                    None, output_fields=["id"], limit=2, offset=1,
+                    order_by_pk=True,
+                )
+                assert [r["id"] for r in rows] == ["b", "c"]
+
 
 # ---------------------------------------------------------------------------
 # gRPC integration tests
@@ -106,6 +137,27 @@ def _setup_collection(client, name, n=20):
                   metric_type="COSINE", params={})
     client.create_index(name, idx)
     client.load_collection(name)
+
+
+def _setup_unsorted_varchar_collection(client, name):
+    schema = MilvusClient.create_schema()
+    schema.add_field(
+        "id", DataType.VARCHAR, is_primary=True, max_length=8,
+    )
+    schema.add_field("vec", DataType.FLOAT_VECTOR, dim=4)
+    schema.add_field("category", DataType.VARCHAR, max_length=8)
+    client.create_collection(name, schema=schema)
+
+    inserted_ids = ["f", "a", "e", "b", "h", "c", "g", "d"]
+    client.insert(name, [
+        {
+            "id": pk,
+            "vec": [float(i), 0.0, 0.0, 0.0],
+            "category": "keep",
+        }
+        for i, pk in enumerate(inserted_ids)
+    ])
+    return inserted_ids
 
 
 def test_query_iterator_all_records(milvus_client):
@@ -175,6 +227,82 @@ def test_query_iterator_no_duplicates(milvus_client):
 
     assert len(seen) == 50
     milvus_client.drop_collection("qi_nodup")
+
+
+def test_query_iterator_unsorted_varchar_pk_exactly_once(milvus_client):
+    """Regression for #366: cursor paging requires PK-ordered pages."""
+    inserted_ids = _setup_unsorted_varchar_collection(
+        milvus_client, "qi_varchar_unsorted",
+    )
+
+    it = milvus_client.query_iterator(
+        "qi_varchar_unsorted",
+        batch_size=3,
+        filter='category == "keep"',
+        output_fields=["id"],
+        limit=-1,
+    )
+    returned_ids = []
+    while True:
+        batch = it.next()
+        if not batch:
+            break
+        returned_ids.extend(row["id"] for row in batch)
+    it.close()
+
+    assert returned_ids == sorted(inserted_ids)
+
+
+def test_query_iterator_pk_in_filter_uses_ordered_query_path(milvus_client):
+    """Iterator mode must not use the unordered primary-key get fast path."""
+    inserted_ids = _setup_unsorted_varchar_collection(
+        milvus_client, "qi_varchar_pk_in",
+    )
+    filter_expr = "id in [" + ", ".join(
+        f'"{pk}"' for pk in inserted_ids
+    ) + "]"
+
+    it = milvus_client.query_iterator(
+        "qi_varchar_pk_in",
+        batch_size=3,
+        filter=filter_expr,
+        output_fields=["id"],
+        limit=-1,
+    )
+    returned_ids = []
+    while True:
+        batch = it.next()
+        if not batch:
+            break
+        returned_ids.extend(row["id"] for row in batch)
+    it.close()
+
+    assert returned_ids == sorted(inserted_ids)
+
+
+def test_query_iterator_offset_uses_ordered_seek_path(milvus_client):
+    """The iterator's internal iterator=False seek requests still need order."""
+    inserted_ids = _setup_unsorted_varchar_collection(
+        milvus_client, "qi_varchar_offset",
+    )
+
+    it = milvus_client.query_iterator(
+        "qi_varchar_offset",
+        batch_size=2,
+        filter='category == "keep"',
+        output_fields=["id"],
+        offset=3,
+        limit=-1,
+    )
+    returned_ids = []
+    while True:
+        batch = it.next()
+        if not batch:
+            break
+        returned_ids.extend(row["id"] for row in batch)
+    it.close()
+
+    assert returned_ids == sorted(inserted_ids)[3:]
 
 
 def test_search_iterator(milvus_client):

@@ -425,6 +425,7 @@ class MilvusServicer(milvus_pb2_grpc.MilvusServiceServicer):
             # Extract limit and offset from query_params KV list.
             limit = None
             offset = 0
+            iterator_request = False
             timezone = _extract_timezone(request.query_params)
             time_fields = _extract_time_fields(request.query_params)
             for kv in request.query_params:
@@ -438,6 +439,11 @@ class MilvusServicer(milvus_pb2_grpc.MilvusServiceServicer):
                         offset = int(kv.value)
                     except (ValueError, TypeError):
                         pass
+                elif kv.key == "iterator":
+                    # QueryIterator uses iterator=False while seeking to an
+                    # initial offset, but that request still advances a PK
+                    # cursor and therefore needs the same stable ordering.
+                    iterator_request = True
 
             # Handle count(*) aggregation
             if output_fields and "count(*)" in output_fields:
@@ -468,7 +474,14 @@ class MilvusServicer(milvus_pb2_grpc.MilvusServiceServicer):
             )
 
             expr = request.expr if request.expr else None
-            pks = self._extract_pks_from_expr(expr, col) if expr else None
+            # Cursor pagination adds ``pk > last_pk`` between requests and
+            # therefore requires every page to be in primary-key order.  It
+            # must also avoid the get-by-PK fast path, which preserves input
+            # order rather than sorting by primary key.
+            pks = (
+                self._extract_pks_from_expr(expr, col)
+                if expr and not iterator_request else None
+            )
             if pks is not None:
                 rows = col.get(pks, partition_names=partition_names,
                                output_fields=output_fields)
@@ -480,6 +493,7 @@ class MilvusServicer(milvus_pb2_grpc.MilvusServiceServicer):
                     limit=limit,
                     offset=offset,
                     timezone=timezone,
+                    order_by_pk=iterator_request,
                 )
 
             return milvus_pb2.QueryResults(
